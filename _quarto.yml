@@ -21,7 +21,7 @@ website:
         text: "5. Appendix: Agentic RAG Pipeline"
     right:
       - icon: github
-        href: https://github.com/yourusername/mi-abogado-extension
+        href: https://github.com/avikodali0331/mi-abogado-evaluation
         text: "Source Code"
 
 format:
