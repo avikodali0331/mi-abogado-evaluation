@@ -1,0 +1,141 @@
+---
+title: "Appendix: Automating Documentary Work via Local Agentic RAG"
+format: html
+---
+
+## The Bureaucratic Bottleneck
+
+The *Mi Abogado* evaluation notes that a significant hurdle in child welfare cases is the sheer volume of "documentary work." Attorneys must process an average of 18 legal processes and psychological evaluations per child in the first year alone. 
+
+Child welfare data is highly sensitive, we cannot use public APIs like OpenAI to summarize these files. Below is a proof-of-concept for a **Local Agentic RAG system**. By orchestrating specialized agents via `LangGraph` and running local inference via `Ollama`, we can automate document summarization while ensuring zero data leaves the local machine.
+
+## 1. Environment Setup
+
+```python
+from typing import Dict, TypedDict, List
+from langchain_ollama import ChatOllama
+from langchain_core.messages import SystemMessage, HumanMessage
+from langgraph.graph import StateGraph, END
+
+# Initialize the local Ollama model (e.g., Llama 3 or Mistral)
+local_llm = ChatOllama(model="llama3", temperature=0)
+```
+
+## 2. Defining the Graph State
+
+We define a state dictionary to hold the document content, its classification, and the resulting summaries as it passes through the graph network.
+
+```python
+class AgentState(TypedDict):
+    document_text: str
+    doc_type: str        # 'legal_writ' or 'psych_eval'
+    specialist_summary: str
+    final_report: str
+```
+
+## 3. Building the Agent Nodes
+
+We need three distinct nodes: a router to classify the text, specialized summarizers to extract domain-specific entities, and a synthesizer to format the output for the attorney.
+
+```python
+def routing_agent(state: AgentState):
+    """Determines if the document is a court writ or a psychological evaluation."""
+    prompt = f"Classify this text as either 'legal_writ' or 'psych_eval'. Text: {state['document_text'][:500]}"
+    response = local_llm.invoke([HumanMessage(content=prompt)])
+    
+    # Simple parsing logic for the POC
+    doc_type = "psych_eval" if "psych" in response.content.lower() else "legal_writ"
+    return {"doc_type": doc_type}
+
+def legal_specialist(state: AgentState):
+    """Extracts hearing dates, judge rulings, and custody status."""
+    sys_msg = SystemMessage(content="You are a paralegal. Extract hearing dates, rulings, and next steps from this court writ. Be concise.")
+    response = local_llm.invoke([sys_msg, HumanMessage(content=state["document_text"])])
+    return {"specialist_summary": response.content}
+
+def psych_specialist(state: AgentState):
+    """Extracts behavioral observations and therapy recommendations."""
+    sys_msg = SystemMessage(content="You are a clinical assistant. Summarize the behavioral observations and recommendations from this psychological evaluation safely and objectively.")
+    response = local_llm.invoke([sys_msg, HumanMessage(content=state["document_text"])])
+    return {"specialist_summary": response.content}
+
+def lead_attorney_synthesizer(state: AgentState):
+    """Drafts the final brief for the Mi Abogado lawyer."""
+    sys_msg = SystemMessage(content="Draft a 3-bullet-point executive summary of this case update for the lead attorney.")
+    prompt = f"Document Type: {state['doc_type']}\nDetails: {state['specialist_summary']}"
+    response = local_llm.invoke([sys_msg, HumanMessage(content=prompt)])
+    return {"final_report": response.content}
+```
+
+## 4. Orchestrating the Graph
+
+We map the nodes and define conditional edges to route the document to the correct specialist based on the router's classification.
+
+```python
+# Initialize the graph
+workflow = StateGraph(AgentState)
+
+# Add the nodes
+workflow.add_node("router", routing_agent)
+workflow.add_node("legal_desk", legal_specialist)
+workflow.add_node("psych_desk", psych_specialist)
+workflow.add_node("synthesizer", lead_attorney_synthesizer)
+
+# Define the routing logic
+def route_document(state: AgentState):
+    if state["doc_type"] == "legal_writ":
+        return "legal_desk"
+    return "psych_desk"
+
+# Build the edges
+workflow.set_entry_point("router")
+workflow.add_conditional_edges(
+    "router",
+    route_document,
+    {"legal_desk": "legal_desk", "psych_desk": "psych_desk"}
+)
+workflow.add_edge("legal_desk", "synthesizer")
+workflow.add_edge("psych_desk", "synthesizer")
+workflow.add_edge("synthesizer", END)
+
+# Compile the Agentic RAG application
+app = workflow.compile()
+```
+
+## 5. Execution Example
+
+When a new document enters the system, the LangGraph workflow automatically classifies it, extracts the relevant legal or clinical entities, and generates a standardized brief.
+
+```python
+# Example input: A synthetic court writ
+sample_document = """
+IN THE FAMILY COURT OF SANTIAGO. 
+Hearing Date: October 12, 2024. 
+The Honorable Judge presiding. 
+Order: The minor is to remain in the temporary collaborative residence for an additional 30 days pending the mother's completion of the mandated counseling program. Next review hearing scheduled for November 15, 2024.
+"""
+
+initial_state = {"document_text": sample_document}
+
+# Run the graph
+for output in app.stream(initial_state):
+    for key, value in output.items():
+        print(f"Node '{key}' processed the document.")
+
+print("\n--- FINAL ATTORNEY BRIEF ---")
+print(value["final_report"])
+```
+*(Note: Because this pipeline relies on local LLM inference, live execution is disabled for this static website build. Below is the direct console output from running the `app.stream()` execution on the sample document).*
+
+```text
+Node 'router' processed the document.
+Node 'legal_desk' processed the document.
+Node 'synthesizer' processed the document.
+
+--- FINAL ATTORNEY BRIEF ---
+Here is a 3-bullet-point executive summary for the lead attorney:
+
+• The court has ruled that the minor will remain in the temporary collaborative residence for an additional 30 days pending the mother's completion of the mandated counseling program.
+• To move forward, the mother must complete the required counseling program and prepare for the next review hearing.
+• A follow-up review hearing is scheduled for November 15, 2024, to assess the mother's progress and determine the next steps in this case.
+```

@@ -1,0 +1,106 @@
+---
+title: "Cost-Benefit Analysis: The Financial Impact"
+format: html
+execute:
+  warning: false
+  message: false
+---
+
+## Overview
+
+Statistical significance is only one component of program evaluation; policy adoption ultimately requires financial justification. The *Mi Abogado* program requires a heavier upfront investment in legal aid, as its lawyers manage strictly capped caseloads and are paid at a higher rate than standard public defenders. 
+
+In this section, we replicate the cost-benefit analysis from the original trial (Table 12) to determine if the program's success in reducing time in state custody offsets its operational costs.
+
+## 1. Environment Setup & Cost Parameters
+
+We begin by establishing the daily costs associated with the child welfare and legal systems in Chile, converted to 2022 US Dollars.
+
+* **Legal Aid Costs:** The *Mi Abogado* program costs $4.99 per child per day, whereas standard non-MA legal representation costs $2.73 per child per day.
+* **Substitute Care Costs:** Public, directly-administered residences are highly expensive at $67.27 per child per day. Nonprofit collaborative residences cost $28.35 per child per day, and nonprofit family foster care costs $13.94 per day.
+
+```{r setup}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+
+# Define the daily costs (in USD)
+cost_ma_lawyer <- 4.99
+cost_std_lawyer <- 2.73
+cost_pub_residence <- 67.27
+cost_np_residence <- 28.35
+cost_foster_care <- 13.94
+```
+
+## 2. Estimating the Net Financial Impact
+
+Over a nearly two-year observation period (721 days), children assigned to the treatment group experienced significant shifts in their care trajectories. We construct a financial summary table to calculate the net savings to the *Servicio Nacional de Menores* (SENAME) per child.
+
+```{r cost-benefit-table}
+# Replicating the exact treatment differences observed in the trial
+cba_data <- tibble(
+  Category = c(
+    "Days w/ MA Lawyer",
+    "Days w/ Non-MA Lawyer",
+    "Days in residence (public)",
+    "Days in residence (nonprofit)",
+    "Days in family foster care"
+  ),
+  `Treatment Mean` = c(340.63, 92.42, 126.37, 321.83, 13.06),
+  `Control Mean` = c(234.89, 182.00, 131.98, 351.29, 7.66),
+  Difference = c(105.74, -89.57, -5.61, -29.46, 5.41),
+  `Daily Cost ($)` = c(
+    cost_ma_lawyer,
+    cost_std_lawyer,
+    cost_pub_residence,
+    cost_np_residence,
+    cost_foster_care
+  )
+) %>%
+  mutate(
+    `Net Impact ($)` = Difference * `Daily Cost ($)`
+  )
+
+# Calculate total savings
+total_savings <- sum(cba_data$`Net Impact ($)`)
+
+# Add a total row for the final table output
+cba_table <- cba_data %>%
+  bind_rows(
+    tibble(
+      Category = "Total Net Impact per Child",
+      `Treatment Mean` = NA,
+      `Control Mean` = NA,
+      Difference = NA,
+      `Daily Cost ($)` = NA,
+      `Net Impact ($)` = total_savings
+    )
+  )
+
+# Render a HTML table
+options(knitr.kable.NA = '')
+
+cba_table %>%
+  kable(digits = 2, format.args = list(big.mark = ",")) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  ) %>%
+  row_spec(
+    nrow(cba_table),
+    bold = TRUE,
+    color = "white",
+    background = "steelblue4"
+  )
+```
+
+## 3. Return on Investment (ROI)
+
+The financial calculations reveal a compelling argument for scaling the program. 
+
+**1. The Cost of Intervention:** The treatment group spent approximately 106 more days with a *Mi Abogado* lawyer and 90 fewer days with a standard lawyer. This resulted in an increased legal aid investment of roughly **$283.11 per child** ($527.64 - $244.53).
+
+**2. The Savings from Permanency:** Because the program successfully accelerated family reunification, treated children spent significantly fewer days in highly expensive state and nonprofit residences. This reduction generated **$1,212.57 in savings per child** across the residential network.
+
+**Conclusion:**
+The *Mi Abogado* program easily pays for itself. The state generated an average net savings of **$854.04 per child**. Put another way, for every $1 of additional legal aid investment required to fund the program, the child welfare system saved over $3.00. This creates a rare policy scenario where improving child well-being simultaneously reduces government expenditure.

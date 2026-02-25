@@ -1,0 +1,254 @@
+[
+  {
+    "objectID": "01-data-simulation.html",
+    "href": "01-data-simulation.html",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "",
+    "text": "This document generates a synthetic dataset to replicate the core findings of Cooper, Doyle, and Hojman (2023). The program, Mi Abogado, provides enhanced legal representation to children in foster care. The randomization was stratified by age group (under 12 vs. 12 and older), sex, and region.\nWe simulate a cohort of \\(N = 1871\\) children, matching the baseline summary statistics (Table 1) and injecting a treatment effect on the outcome variable: Days Living with Family (Table 3)."
+  },
+  {
+    "objectID": "01-data-simulation.html#overview",
+    "href": "01-data-simulation.html#overview",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "",
+    "text": "This document generates a synthetic dataset to replicate the core findings of Cooper, Doyle, and Hojman (2023). The program, Mi Abogado, provides enhanced legal representation to children in foster care. The randomization was stratified by age group (under 12 vs. 12 and older), sex, and region.\nWe simulate a cohort of \\(N = 1871\\) children, matching the baseline summary statistics (Table 1) and injecting a treatment effect on the outcome variable: Days Living with Family (Table 3)."
+  },
+  {
+    "objectID": "01-data-simulation.html#environment-setup",
+    "href": "01-data-simulation.html#environment-setup",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "1. Environment Setup",
+    "text": "1. Environment Setup\n\n\nCode\nlibrary(tidyverse)\n# Set seed for reproducibility\nset.seed(0331)"
+  },
+  {
+    "objectID": "01-data-simulation.html#simulating-baseline-characteristics",
+    "href": "01-data-simulation.html#simulating-baseline-characteristics",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "2. Simulating Baseline Characteristics",
+    "text": "2. Simulating Baseline Characteristics\nFirst, we generate the 1,871 children and populate their baseline demographic and case characteristics based on the control group means from the paper’s balance table.\n\n\nCode\nn_obs &lt;- 1871\n\nsynthetic_data &lt;- tibble(\n  child_id = 1:n_obs,\n  \n  # Demographics\n  female = rbinom(n_obs, 1, 0.57), # 57% female\n  age_at_rand = rnorm(n_obs, mean = 13.7, sd = 3.3), # Mean age 13.7\n  \n  # Stratification variables\n  age_group = ifelse(age_at_rand &lt; 12, \"Under 12\", \"12 and Older\"),\n  region = sample(\n    c(\"Metropolitan\", \"Valparaiso\", \"Biobio\", \"Maule\"), \n    size = n_obs, \n    replace = TRUE, \n    prob = c(0.4, 0.2, 0.2, 0.2) # Approximated region distribution\n  ),\n  \n  # Case Characteristics\n  school_delay = rpois(n_obs, lambda = 0.8), # Mean delay 0.8 years\n  allegation_neglect = rbinom(n_obs, 1, 0.85), # 85% neglect\n  allegation_physical = rbinom(n_obs, 1, 0.26), # 26% physical abuse\n  allegation_sexual = rbinom(n_obs, 1, 0.17) # 17% sexual abuse\n) %&gt;%\n  # Ensure age doesn't dip into impossible negative bounds\n  mutate(age_at_rand = pmax(age_at_rand, 6)) # Trial was for ages 6-18"
+  },
+  {
+    "objectID": "01-data-simulation.html#stratified-randomization",
+    "href": "01-data-simulation.html#stratified-randomization",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "3. Stratified Randomization",
+    "text": "3. Stratified Randomization\nThe intervention was capacity-constrained, so treatment assignment was randomized within strata.\n\n\nCode\n# Randomly assign ~31% to treatment (581 out of 1871 slots)\n# Grouping by our strata to mimic the stratified block randomization\nsynthetic_data &lt;- synthetic_data %&gt;%\n  group_by(region, age_group, female) %&gt;%\n  mutate(\n    treated = sample(c(0, 1), size = n(), replace = TRUE, prob = c(0.69, 0.31))\n  ) %&gt;%\n  ungroup()"
+  },
+  {
+    "objectID": "01-data-simulation.html#expanding-to-a-panel-and-simulating-outcomes",
+    "href": "01-data-simulation.html#expanding-to-a-panel-and-simulating-outcomes",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "4. Expanding to a Panel and Simulating Outcomes",
+    "text": "4. Expanding to a Panel and Simulating Outcomes\nThe research relies on longitudinal administrative data, so we need to expand our cross-sectional data into a panel spanning 8 quarters (2 years post-randomization).\nWe use a Gamma distribution log-link structure to simulate “Days Living with Family”. The control group averages ~21.7 days post-randomization, and the treatment group sees an increase of ~5.6 days.\n\n\nCode\n# Expand to 8 quarters\npanel_data &lt;- synthetic_data %&gt;%\n  crossing(quarter = 1:8) %&gt;%\n  mutate(\n    post = ifelse(quarter &gt;= 4, 1, 0), # Assume randomization happens at end of Q3\n    \n    # Define the Data Generating Process (DGP) using a Gamma GLM structure\n    # Baseline log-days, plus a small bump for older kids/females, \n    # and the explicit treatment effect in the post period.\n    linear_predictor = 2.5 + \n                       0.1 * female + \n                       0.05 * (age_at_rand - 13) - \n                       0.2 * allegation_sexual + \n                       0.25 * treated * post, # The Treatment Effect (ATE)\n                       \n    # Translate predictor to the expected value (mu) via log-link inverse\n    mu_days = exp(linear_predictor),\n    \n    # Introduce Gamma noise (shape/rate parameterization)\n    # Shape = 2 gives a nice right-skewed distribution of days\n    days_with_family = rgamma(n(), shape = 2, rate = 2 / mu_days)\n  ) %&gt;%\n  # Cap days at 90 (max days in a quarter)\n  mutate(days_with_family = pmin(round(days_with_family), 90))\n\n# Check the simulated effect\npanel_data %&gt;%\n  group_by(treated, post) %&gt;%\n  summarize(mean_days = mean(days_with_family), .groups = 'drop')\n\n\n# A tibble: 4 × 3\n  treated  post mean_days\n    &lt;dbl&gt; &lt;dbl&gt;     &lt;dbl&gt;\n1       0     0      13.1\n2       0     1      13.0\n3       1     0      13.2\n4       1     1      16.8"
+  },
+  {
+    "objectID": "01-data-simulation.html#export-for-analysis",
+    "href": "01-data-simulation.html#export-for-analysis",
+    "title": "Data Simulation: Mi Abogado Synthetic Cohort",
+    "section": "5. Export for Analysis",
+    "text": "5. Export for Analysis\n\n\nCode\n# Save the synthetic panel data for the replication and ML scripts\ndir.create(\"data\", showWarnings = FALSE)\nwrite_rds(panel_data, \"data/synthetic_mi_abogado_panel.rds\")"
+  },
+  {
+    "objectID": "03-causal-ml-extension.html",
+    "href": "03-causal-ml-extension.html",
+    "title": "Causal ML Extension: Heterogeneous Treatment Effects",
+    "section": "",
+    "text": "The baseline difference-in-differences model identified an average treatment effect (ATE) of roughly 5.6 additional days living with family per quarter for children in the Mi Abogado program. However, child welfare interventions rarely impact all cases equally. The authors explore this heterogeneity by splitting the sample into subgroups.\nIn this extension, we apply a machine learning approach to estimate the Conditional Average Treatment Effect (CATE). Specifically, we use a Causal Forest to understand not just if the program works on average, but for whom it works best.\n\\[ \\tau(x) = E[Y_i(1) - Y_i(0) | X_i = x] \\]"
+  },
+  {
+    "objectID": "03-causal-ml-extension.html#overview",
+    "href": "03-causal-ml-extension.html#overview",
+    "title": "Causal ML Extension: Heterogeneous Treatment Effects",
+    "section": "",
+    "text": "The baseline difference-in-differences model identified an average treatment effect (ATE) of roughly 5.6 additional days living with family per quarter for children in the Mi Abogado program. However, child welfare interventions rarely impact all cases equally. The authors explore this heterogeneity by splitting the sample into subgroups.\nIn this extension, we apply a machine learning approach to estimate the Conditional Average Treatment Effect (CATE). Specifically, we use a Causal Forest to understand not just if the program works on average, but for whom it works best.\n\\[ \\tau(x) = E[Y_i(1) - Y_i(0) | X_i = x] \\]"
+  },
+  {
+    "objectID": "03-causal-ml-extension.html#environment-setup-data-prep",
+    "href": "03-causal-ml-extension.html#environment-setup-data-prep",
+    "title": "Causal ML Extension: Heterogeneous Treatment Effects",
+    "section": "1. Environment Setup & Data Prep",
+    "text": "1. Environment Setup & Data Prep\n\n\nCode\nlibrary(tidyverse)\nlibrary(grf)          \nlibrary(ggplot2)\n\n# Load the synthetic panel data\npanel_data &lt;- read_rds(\"data/synthetic_mi_abogado_panel.rds\")\n\n# To use grf, we need cross-sectional data. We will aggregate the outcome \n# (average days with family) for each child in the post-randomization period.\ncross_section &lt;- panel_data %&gt;%\n  filter(post == 1) %&gt;%\n  group_by(child_id, treated, female, age_at_rand, age_group, region, \n           school_delay, allegation_neglect, allegation_physical, allegation_sexual) %&gt;%\n  summarize(avg_days_post = mean(days_with_family), .groups = 'drop')"
+  },
+  {
+    "objectID": "03-causal-ml-extension.html#training-the-causal-forest",
+    "href": "03-causal-ml-extension.html#training-the-causal-forest",
+    "title": "Causal ML Extension: Heterogeneous Treatment Effects",
+    "section": "2. Training the Causal Forest",
+    "text": "2. Training the Causal Forest\nThe grf package requires our covariates (\\(X\\)) to be a numeric matrix. We will convert our categorical variables (like region) into dummy variables, separate our treatment indicator (\\(W\\)), and isolate our outcome (\\(Y\\)).\n\n\nCode\n# 1. Covariate Matrix (X)\n# We use model.matrix to handle dummy encoding for the region and age_group factors\nX_df &lt;- cross_section %&gt;%\n  select(-child_id, -treated, -avg_days_post)\n\nX &lt;- model.matrix(~ . - 1, data = X_df)\n\n# 2. Treatment Vector (W)\nW &lt;- cross_section$treated\n\n# 3. Outcome Vector (Y)\nY &lt;- cross_section$avg_days_post\n\n# Train the Causal Forest\n# We set a seed within the function for reproducibility\nc_forest &lt;- causal_forest(\n  X = X,\n  Y = Y,\n  W = W,\n  num.trees = 2000,\n  seed = 0331\n)\n\n# Print out the Average Treatment Effect estimated by the forest\nate_cf &lt;- average_treatment_effect(c_forest, target.sample = \"all\")\npaste(\"Causal Forest ATE:\", round(ate_cf[\"estimate\"], 2), \n      \"days (SE:\", round(ate_cf[\"std.err\"], 2), \")\")\n\n\n[1] \"Causal Forest ATE: 3.8 days (SE: 0.27 )\""
+  },
+  {
+    "objectID": "03-causal-ml-extension.html#variable-importance",
+    "href": "03-causal-ml-extension.html#variable-importance",
+    "title": "Causal ML Extension: Heterogeneous Treatment Effects",
+    "section": "3. Variable Importance",
+    "text": "3. Variable Importance\nWhich baseline characteristics are most responsible for driving the heterogeneity in treatment effects? We can extract the variable importance scores from the causal forest to find out.\n\n\nCode\n# Extract variable importance\nvar_imp &lt;- variable_importance(c_forest)\nvar_names &lt;- colnames(X)\n\n# Create a clean dataframe for plotting\nimportance_df &lt;- tibble(\n  Variable = var_names,\n  Importance = as.numeric(var_imp)\n) %&gt;%\n  arrange(desc(Importance)) %&gt;%\n  # Clean up variable names for the plot\n  mutate(Variable = str_replace_all(Variable, \"allegation_\", \"Allegation: \"),\n         Variable = str_replace_all(Variable, \"region\", \"Region: \"),\n         Variable = str_to_title(str_replace_all(Variable, \"_\", \" \")))\n\n# Plot the importance\nggplot(importance_df, aes(x = reorder(Variable, Importance), y = Importance)) +\n  geom_col(fill = \"gray30\", alpha = 0.8) +\n  coord_flip() +\n  labs(\n    title = \"Causal Forest: Variable Importance\",\n    subtitle = \"Which factors drive the heterogeneity in treatment effects?\",\n    x = \"Baseline Characteristic\",\n    y = \"Importance Score\"\n  ) +\n  theme_minimal() +\n  theme(plot.title = element_text(face = \"bold\"))\n\n\n\n\n\n\n\n\n\nInterpretation: The plot above reveals which baseline characteristics the Causal Forest splits on most frequently to maximize differences in treatment effects. Age at Randomization overwhelmingly dominates the model, indicating it is the single most critical factor in predicting a child’s response to the enhanced legal aid. To a much lesser but still notable extent, whether the child resides in the Metropolitan region and whether their case involves a Sexual abuse allegation also serve as key drivers in differentiating highly successful interventions from average ones."
+  },
+  {
+    "objectID": "03-causal-ml-extension.html#the-distribution-of-treatment-effects",
+    "href": "03-causal-ml-extension.html#the-distribution-of-treatment-effects",
+    "title": "Causal ML Extension: Heterogeneous Treatment Effects",
+    "section": "4. The Distribution of Treatment Effects",
+    "text": "4. The Distribution of Treatment Effects\nFinally, we predict the specific CATE for every child in our dataset and plot the distribution. This highlights the spread of the program’s effectiveness across the population.\n\n\nCode\n# Predict the CATE for each child (out-of-bag estimates)\ncate_predictions &lt;- predict(c_forest)$predictions\ncross_section$CATE &lt;- cate_predictions\n\n# Plot the distribution of the CATEs\nggplot(cross_section, aes(x = CATE)) +\n  geom_histogram(fill = \"coral3\", color = \"white\", bins = 30, alpha = 0.8) +\n  geom_vline(xintercept = ate_cf[\"estimate\"], linetype = \"dashed\", color = \"black\", linewidth = 1) +\n  annotate(\"text\", x = ate_cf[\"estimate\"] + 0.2, y = 150, \n           label = \"Average Treatment Effect\", angle = 90, vjust = 1.5) +\n  labs(\n    title = \"Distribution of Conditional Average Treatment Effects (CATE)\",\n    subtitle = \"Each observation represents an individual child's estimated treatment effect.\",\n    x = \"Estimated Increase in Days Living with Family per Quarter\",\n    y = \"Count of Children\"\n  ) +\n  theme_minimal() +\n  theme(plot.title = element_text(face = \"bold\"))\n\n\n\n\n\n\n\n\n\nConclusion: While the baseline model found an average benefit of 3.74 days, this CATE distribution reveals a striking bimodal (two-peaked) spread. The estimated individual treatment effects range from roughly 1 to over 6 additional days with family per quarter, with distinct clusters forming around the 3-day and 5-day marks. This proves that the program’s benefits are highly non-uniform. By cross-referencing this distribution with our variable importance metrics, welfare agencies can mathematically identify the specific demographic profiles driving that high-impact 5-day peak, enabling data-driven targeting of constrained legal resources."
+  },
+  {
+    "objectID": "about.html",
+    "href": "about.html",
+    "title": "About",
+    "section": "",
+    "text": "About this site"
+  },
+  {
+    "objectID": "02-baseline-replication.html",
+    "href": "02-baseline-replication.html",
+    "title": "Baseline Replication: Difference-in-Differences",
+    "section": "",
+    "text": "In this section, we replicate the core Intent-to-Treat (ITT) econometric models from the evaluation of the Mi Abogado program. The primary outcome of interest is the number of days a child spends living with their biological or adoptive family in a given quarter.\nWe estimate two models: 1. A Pooled Difference-in-Differences (DiD) Model: To capture the average treatment effect across the entire post-randomization period. 2. An Event Study Model: To map the dynamic treatment effects quarter-by-quarter and verify the parallel trends assumption in the pre-treatment periods."
+  },
+  {
+    "objectID": "02-baseline-replication.html#overview",
+    "href": "02-baseline-replication.html#overview",
+    "title": "Baseline Replication: Difference-in-Differences",
+    "section": "",
+    "text": "In this section, we replicate the core Intent-to-Treat (ITT) econometric models from the evaluation of the Mi Abogado program. The primary outcome of interest is the number of days a child spends living with their biological or adoptive family in a given quarter.\nWe estimate two models: 1. A Pooled Difference-in-Differences (DiD) Model: To capture the average treatment effect across the entire post-randomization period. 2. An Event Study Model: To map the dynamic treatment effects quarter-by-quarter and verify the parallel trends assumption in the pre-treatment periods."
+  },
+  {
+    "objectID": "02-baseline-replication.html#environment-setup",
+    "href": "02-baseline-replication.html#environment-setup",
+    "title": "Baseline Replication: Difference-in-Differences",
+    "section": "1. Environment Setup",
+    "text": "1. Environment Setup\n\n\nCode\nlibrary(tidyverse)\nlibrary(fixest)       \nlibrary(modelsummary) \nlibrary(broom)        \nlibrary(plotly)       \n\n# Load the synthetic panel data generated in Chapter 1\npanel_data &lt;- read_rds(\"data/synthetic_mi_abogado_panel.rds\")"
+  },
+  {
+    "objectID": "02-baseline-replication.html#pooled-difference-in-differences",
+    "href": "02-baseline-replication.html#pooled-difference-in-differences",
+    "title": "Baseline Replication: Difference-in-Differences",
+    "section": "2. Pooled Difference-in-Differences",
+    "text": "2. Pooled Difference-in-Differences\nWe estimate the pooled ITT model where the outcome Y is regressed on strata covariates X, a treatment indicator T, a post-period indicator Post, and their interaction (T * Post).\nThe coefficient on the interaction term represents the average difference between the treatment and control groups in the post-period relative to the pre-period. Standard errors are clustered at the child level to account for repeated observations.\n\n\nCode\n# Run the pooled DiD using feols()\ndid_model &lt;- feols(\n  days_with_family ~ treated * post + female + age_group + region,\n  data = panel_data,\n  cluster = ~child_id # Clustering at the level of randomization\n)\n\n# Display a clean table\nmodelsummary(\n  list(\"Days Living with Family\" = did_model),\n  stars = TRUE,\n  gof_omit = \"IC|Log|Adj|Within\",\n  coef_rename = c(\"treated\" = \"Assigned to Mi Abogado (T)\",\n                  \"post\" = \"Post-Randomization\",\n                  \"treated:post\" = \"Treatment x Post (ATE)\")\n)\n\n\n\n\n    \n\n    \n\n    \n    \n    \n      \n        \n        \n              \n                 \n                Days Living with Family\n              \n        \n        + p &lt; 0.1, * p &lt; 0.05, ** p &lt; 0.01, *** p &lt; 0.001\n        \n                \n                  (Intercept)\n                  13.265***\n                \n                \n                  \n                  (0.258)\n                \n                \n                  Assigned to Mi Abogado (T)\n                  0.099\n                \n                \n                  \n                  (0.279)\n                \n                \n                  Post-Randomization\n                  -0.103\n                \n                \n                  \n                  (0.188)\n                \n                \n                  female\n                  1.465***\n                \n                \n                  \n                  (0.180)\n                \n                \n                  age_groupUnder 12\n                  -3.272***\n                \n                \n                  \n                  (0.176)\n                \n                \n                  regionMaule\n                  0.272\n                \n                \n                  \n                  (0.285)\n                \n                \n                  regionMetropolitan\n                  -0.076\n                \n                \n                  \n                  (0.247)\n                \n                \n                  regionValparaiso\n                  0.205\n                \n                \n                  \n                  (0.272)\n                \n                \n                  Treatment x Post (ATE)\n                  3.740***\n                \n                \n                  \n                  (0.366)\n                \n                \n                  Num.Obs.\n                  14968\n                \n                \n                  R2\n                  0.047\n                \n                \n                  RMSE\n                  10.18\n                \n                \n                  Std.Errors\n                  by: child_id\n                \n        \n      \n    \n\n\n\nInterpretation: The coefficient on the interaction term represents the Average Treatment Effect (ATE). In our synthetic cohort, assignment to the Mi Abogado program increases the time a child spends living with their family by approximately 3.74 days per quarter (\\(p &lt; 0.001\\)), mirroring the highly significant positive trajectory found in the original paper."
+  },
+  {
+    "objectID": "02-baseline-replication.html#dynamic-event-study",
+    "href": "02-baseline-replication.html#dynamic-event-study",
+    "title": "Baseline Replication: Difference-in-Differences",
+    "section": "3. Dynamic Event Study",
+    "text": "3. Dynamic Event Study\nTo understand how this effect evolves over time and to check for pre-treatment parallel trends, we estimate an event study specification. We interact the treatment indicator with each calendar quarter, omitting Quarter 3 (the period immediately prior to randomization) as our reference group.\n\n\nCode\n# Run the event study model\n# i() is a special fixest function that creates interactions and handles factors\nes_model &lt;- feols(\n  days_with_family ~ treated +\n    i(quarter) +\n    i(quarter, treated, ref = 3) +\n    female +\n    age_group +\n    region,\n  data = panel_data,\n  cluster = ~child_id\n)\n\n# Extract the coefficients for plotting\nes_results &lt;- broom::tidy(es_model, conf.int = TRUE) %&gt;%\n  # Fix: Look for both words separately so it catches any naming format\n  filter(grepl(\"quarter\", term) & grepl(\"treated\", term)) %&gt;%\n  # Clean up the term column to just get the numeric quarter\n  mutate(\n    quarter = as.numeric(str_extract(term, \"\\\\d+\")),\n    is_post = ifelse(quarter &gt;= 4, \"Post-Treatment\", \"Pre-Treatment\")\n  ) %&gt;%\n  # Add the reference quarter (Q3) back in with 0s for the plot\n  bind_rows(\n    tibble(\n      term = \"reference\",\n      estimate = 0,\n      std.error = 0,\n      conf.low = 0,\n      conf.high = 0,\n      quarter = 3,\n      is_post = \"Pre-Treatment\"\n    )\n  ) %&gt;%\n  arrange(quarter)"
+  },
+  {
+    "objectID": "02-baseline-replication.html#interactive-event-study-visualization",
+    "href": "02-baseline-replication.html#interactive-event-study-visualization",
+    "title": "Baseline Replication: Difference-in-Differences",
+    "section": "4. Interactive Event Study Visualization",
+    "text": "4. Interactive Event Study Visualization\nWe use ggplot2 and plotly to create an interactive event study graph.\n\n\nCode\n# Build the base ggplot\np &lt;- ggplot(es_results, aes(x = quarter, y = estimate, color = is_post)) +\n  geom_hline(yintercept = 0, linetype = \"dashed\", color = \"black\", alpha = 0.6) +\n  geom_vline(xintercept = 3.5, linetype = \"solid\", color = \"darkred\", alpha = 0.8) +\n  geom_point(size = 3) +\n  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, linewidth = 1) +\n  scale_color_manual(values = c(\"Pre-Treatment\" = \"gray50\", \"Post-Treatment\" = \"steelblue4\")) +\n  scale_x_continuous(breaks = 1:8, labels = paste0(\"Q\", 1:8)) +\n  labs(\n    title = \"Event Study: Effect of Mi Abogado on Days Living with Family\",\n    subtitle = \"Quarter 3 serves as the reference period.\",\n    x = \"Quarter Relative to Randomization\",\n    y = \"Estimated Effect (Days)\",\n    color = \"Period\"\n  ) +\n  theme_minimal() +\n  theme(\n    legend.position = \"bottom\",\n    plot.title = element_text(face = \"bold\", size = 14)\n  )\n\n# Convert to an interactive plotly object\nggplotly(p, tooltip = c(\"x\", \"y\", \"ymin\", \"ymax\")) %&gt;%\n  layout(legend = list(orientation = \"h\", x = 0.3, y = -0.2))\n\n\n\n\n\n\nInterpretation: The interactive plot above demonstrates a credible event study. The pre-treatment coefficients (Q1 through Q3) hover tightly around zero, validating the parallel trends assumption. Following randomization (indicated by the red line), we see a sharp and sustained increase in the number of days treated children spend living with their families."
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Beyond the Average Effect: Causal ML and AI Automation in Child Welfare",
+    "section": "",
+    "text": "This project builds upon the rigorous econometric evaluation of the Mi Abogado program in Chile, as detailed in the NBER working paper “Effects of Enhanced Legal Aid in Child Welfare” by Cooper, Doyle, and Hojman. The original study utilized a randomized controlled trial to demonstrate that providing enhanced, low-caseload legal representation to children in foster care significantly reduces their time in state custody and lowers criminal justice involvement.\nThis portfolio project extends the original analysis beyond a simple replication, bridging classical causal inference with financial policy analysis and modern AI engineering. By moving beyond the Average Treatment Effect (ATE), we utilize machine learning to predict which specific profiles of children benefit most from the program. Furthermore, we translate these statistical gains into a concrete financial Return on Investment (ROI) and propose a generative AI architecture to solve the program’s primary bureaucratic bottleneck."
+  },
+  {
+    "objectID": "index.html#executive-summary",
+    "href": "index.html#executive-summary",
+    "title": "Beyond the Average Effect: Causal ML and AI Automation in Child Welfare",
+    "section": "",
+    "text": "This project builds upon the rigorous econometric evaluation of the Mi Abogado program in Chile, as detailed in the NBER working paper “Effects of Enhanced Legal Aid in Child Welfare” by Cooper, Doyle, and Hojman. The original study utilized a randomized controlled trial to demonstrate that providing enhanced, low-caseload legal representation to children in foster care significantly reduces their time in state custody and lowers criminal justice involvement.\nThis portfolio project extends the original analysis beyond a simple replication, bridging classical causal inference with financial policy analysis and modern AI engineering. By moving beyond the Average Treatment Effect (ATE), we utilize machine learning to predict which specific profiles of children benefit most from the program. Furthermore, we translate these statistical gains into a concrete financial Return on Investment (ROI) and propose a generative AI architecture to solve the program’s primary bureaucratic bottleneck."
+  },
+  {
+    "objectID": "index.html#project-architecture",
+    "href": "index.html#project-architecture",
+    "title": "Beyond the Average Effect: Causal ML and AI Automation in Child Welfare",
+    "section": "Project Architecture",
+    "text": "Project Architecture\nThis repository is structured into four distinct analytical phases, plus an appendix:\n\n1. Data Simulation\nBecause the administrative microdata for the Mi Abogado RCT is restricted, this project begins by generating a highly accurate synthetic cohort. Using a Gamma GLM structure, we simulate \\(N = 1871\\) children, matching the exact demographic distributions, abuse allegations, and randomization strata (region, age, and sex) outlined in the paper’s baseline balance tables.\n\n\n2. Baseline Replication\nUsing the synthetic panel data, we replicate the paper’s core Intent-to-Treat (ITT) methodology. This section features:\n\nA pooled Difference-in-Differences (DiD) model with clustered standard errors.\nAn interactive dynamic event-study visualization to map the treatment effect over time and verify parallel trends.\n\n\n\n3. Causal ML Extension\nWe deploy a Causal Forest to directly estimate the Conditional Average Treatment Effect (CATE) for each child. This includes:\n\nVariable importance plotting to identify which baseline characteristics drive program success.\nAn analysis of the CATE distribution to segment high-impact versus low-impact cases.\n\n\n\n4. Cost-Benefit Analysis\nStatistical significance must be tied to financial viability. This section replicates the original evaluation’s financial impact models, demonstrating that the accelerated family reunification generated by the program yields a net savings of roughly $854 per child for the state.\n\n\n5. Appendix: Agentic RAG for Documentary Work\nThe original authors noted that a major hurdle in these cases is the sheer volume of unstructured “documentary work” (e.g., legal writs, psychological evaluations). To address this, we architected a local, privacy-first Agentic RAG system using Python, LangGraph, and Ollama to automatically synthesize case files without sending sensitive child welfare data to public cloud APIs."
+  },
+  {
+    "objectID": "index.html#core-technologies",
+    "href": "index.html#core-technologies",
+    "title": "Beyond the Average Effect: Causal ML and AI Automation in Child Welfare",
+    "section": "Core Technologies",
+    "text": "Core Technologies\nThis analysis was conducted using a dual-language (R and Python) Quarto environment, utilizing the following tools:\n\ntidyverse & fixest: Data simulation, high-dimensional fixed effects, and event-study estimation (R).\ngrf: Generalized Random Forests for causal inference and heterogeneity (R).\nLangGraph & Ollama: Multi-agent LLM orchestration and local inference for privacy-safe NLP (Python).\nQuarto: Project orchestration and reproducible reporting.\n\nTo explore the analysis, please navigate using the menu on the top."
+  },
+  {
+    "objectID": "04-cost-benefit.html",
+    "href": "04-cost-benefit.html",
+    "title": "Cost-Benefit Analysis: The Financial Impact",
+    "section": "",
+    "text": "Statistical significance is only one component of program evaluation; policy adoption ultimately requires financial justification. The Mi Abogado program requires a heavier upfront investment in legal aid, as its lawyers manage strictly capped caseloads and are paid at a higher rate than standard public defenders.\nIn this section, we replicate the cost-benefit analysis from the original trial (Table 12) to determine if the program’s success in reducing time in state custody offsets its operational costs."
+  },
+  {
+    "objectID": "04-cost-benefit.html#overview",
+    "href": "04-cost-benefit.html#overview",
+    "title": "Cost-Benefit Analysis: The Financial Impact",
+    "section": "",
+    "text": "Statistical significance is only one component of program evaluation; policy adoption ultimately requires financial justification. The Mi Abogado program requires a heavier upfront investment in legal aid, as its lawyers manage strictly capped caseloads and are paid at a higher rate than standard public defenders.\nIn this section, we replicate the cost-benefit analysis from the original trial (Table 12) to determine if the program’s success in reducing time in state custody offsets its operational costs."
+  },
+  {
+    "objectID": "04-cost-benefit.html#environment-setup-cost-parameters",
+    "href": "04-cost-benefit.html#environment-setup-cost-parameters",
+    "title": "Cost-Benefit Analysis: The Financial Impact",
+    "section": "1. Environment Setup & Cost Parameters",
+    "text": "1. Environment Setup & Cost Parameters\nWe begin by establishing the daily costs associated with the child welfare and legal systems in Chile, converted to 2022 US Dollars.\n\nLegal Aid Costs: The Mi Abogado program costs $4.99 per child per day, whereas standard non-MA legal representation costs $2.73 per child per day.\nSubstitute Care Costs: Public, directly-administered residences are highly expensive at $67.27 per child per day. Nonprofit collaborative residences cost $28.35 per child per day, and nonprofit family foster care costs $13.94 per day.\n\n\n\nCode\nlibrary(tidyverse)\nlibrary(knitr)\nlibrary(kableExtra)\n\n# Define the daily costs (in USD)\ncost_ma_lawyer &lt;- 4.99\ncost_std_lawyer &lt;- 2.73\ncost_pub_residence &lt;- 67.27\ncost_np_residence &lt;- 28.35\ncost_foster_care &lt;- 13.94"
+  },
+  {
+    "objectID": "04-cost-benefit.html#estimating-the-net-financial-impact",
+    "href": "04-cost-benefit.html#estimating-the-net-financial-impact",
+    "title": "Cost-Benefit Analysis: The Financial Impact",
+    "section": "2. Estimating the Net Financial Impact",
+    "text": "2. Estimating the Net Financial Impact\nOver a nearly two-year observation period (721 days), children assigned to the treatment group experienced significant shifts in their care trajectories. We construct a financial summary table to calculate the net savings to the Servicio Nacional de Menores (SENAME) per child.\n\n\nCode\n# Replicating the exact treatment differences observed in the trial\ncba_data &lt;- tibble(\n  Category = c(\n    \"Days w/ MA Lawyer\",\n    \"Days w/ Non-MA Lawyer\",\n    \"Days in residence (public)\",\n    \"Days in residence (nonprofit)\",\n    \"Days in family foster care\"\n  ),\n  `Treatment Mean` = c(340.63, 92.42, 126.37, 321.83, 13.06),\n  `Control Mean` = c(234.89, 182.00, 131.98, 351.29, 7.66),\n  Difference = c(105.74, -89.57, -5.61, -29.46, 5.41),\n  `Daily Cost ($)` = c(\n    cost_ma_lawyer,\n    cost_std_lawyer,\n    cost_pub_residence,\n    cost_np_residence,\n    cost_foster_care\n  )\n) %&gt;%\n  mutate(\n    `Net Impact ($)` = Difference * `Daily Cost ($)`\n  )\n\n# Calculate total savings\ntotal_savings &lt;- sum(cba_data$`Net Impact ($)`)\n\n# Add a total row for the final table output\ncba_table &lt;- cba_data %&gt;%\n  bind_rows(\n    tibble(\n      Category = \"Total Net Impact per Child\",\n      `Treatment Mean` = NA,\n      `Control Mean` = NA,\n      Difference = NA,\n      `Daily Cost ($)` = NA,\n      `Net Impact ($)` = total_savings\n    )\n  )\n\n# Render a HTML table\noptions(knitr.kable.NA = '')\n\ncba_table %&gt;%\n  kable(digits = 2, format.args = list(big.mark = \",\")) %&gt;%\n  kable_styling(\n    bootstrap_options = c(\"striped\", \"hover\", \"condensed\"),\n    full_width = FALSE\n  ) %&gt;%\n  row_spec(\n    nrow(cba_table),\n    bold = TRUE,\n    color = \"white\",\n    background = \"steelblue4\"\n  )\n\n\n\n\n\nCategory\nTreatment Mean\nControl Mean\nDifference\nDaily Cost ($)\nNet Impact ($)\n\n\n\n\nDays w/ MA Lawyer\n340.63\n234.89\n105.74\n4.99\n527.64\n\n\nDays w/ Non-MA Lawyer\n92.42\n182.00\n-89.57\n2.73\n-244.53\n\n\nDays in residence (public)\n126.37\n131.98\n-5.61\n67.27\n-377.38\n\n\nDays in residence (nonprofit)\n321.83\n351.29\n-29.46\n28.35\n-835.19\n\n\nDays in family foster care\n13.06\n7.66\n5.41\n13.94\n75.42\n\n\nTotal Net Impact per Child\n\n\n\n\n-854.04"
+  },
+  {
+    "objectID": "04-cost-benefit.html#return-on-investment-roi",
+    "href": "04-cost-benefit.html#return-on-investment-roi",
+    "title": "Cost-Benefit Analysis: The Financial Impact",
+    "section": "3. Return on Investment (ROI)",
+    "text": "3. Return on Investment (ROI)\nThe financial calculations reveal a compelling argument for scaling the program.\n1. The Cost of Intervention: The treatment group spent approximately 106 more days with a Mi Abogado lawyer and 90 fewer days with a standard lawyer. This resulted in an increased legal aid investment of roughly $283.11 per child ($527.64 - $244.53).\n2. The Savings from Permanency: Because the program successfully accelerated family reunification, treated children spent significantly fewer days in highly expensive state and nonprofit residences. This reduction generated $1,212.57 in savings per child across the residential network.\nConclusion: The Mi Abogado program easily pays for itself. The state generated an average net savings of $854.04 per child. Put another way, for every $1 of additional legal aid investment required to fund the program, the child welfare system saved over $3.00. This creates a rare policy scenario where improving child well-being simultaneously reduces government expenditure."
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html",
+    "href": "05-nlp-document-pipeline.html",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "",
+    "text": "The Mi Abogado evaluation notes that a significant hurdle in child welfare cases is the sheer volume of “documentary work.” Attorneys must process an average of 18 legal processes and psychological evaluations per child in the first year alone.\nChild welfare data is highly sensitive, we cannot use public APIs like OpenAI to summarize these files. Below is a proof-of-concept for a Privacy-First, Local Agentic RAG system. By orchestrating specialized agents via LangGraph and running local inference via Ollama, we can automate document summarization while ensuring zero data leaves the local machine."
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html#the-bureaucratic-bottleneck",
+    "href": "05-nlp-document-pipeline.html#the-bureaucratic-bottleneck",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "",
+    "text": "The Mi Abogado evaluation notes that a significant hurdle in child welfare cases is the sheer volume of “documentary work.” Attorneys must process an average of 18 legal processes and psychological evaluations per child in the first year alone.\nChild welfare data is highly sensitive, we cannot use public APIs like OpenAI to summarize these files. Below is a proof-of-concept for a Privacy-First, Local Agentic RAG system. By orchestrating specialized agents via LangGraph and running local inference via Ollama, we can automate document summarization while ensuring zero data leaves the local machine."
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html#environment-setup",
+    "href": "05-nlp-document-pipeline.html#environment-setup",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "1. Environment Setup",
+    "text": "1. Environment Setup\nfrom typing import Dict, TypedDict, List\nfrom langchain_ollama import ChatOllama\nfrom langchain_core.messages import SystemMessage, HumanMessage\nfrom langgraph.graph import StateGraph, END\n\n# Initialize the local Ollama model (e.g., Llama 3 or Mistral)\nlocal_llm = ChatOllama(model=\"llama3\", temperature=0)"
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html#defining-the-graph-state",
+    "href": "05-nlp-document-pipeline.html#defining-the-graph-state",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "2. Defining the Graph State",
+    "text": "2. Defining the Graph State\nWe define a state dictionary to hold the document content, its classification, and the resulting summaries as it passes through the graph network.\nclass AgentState(TypedDict):\n    document_text: str\n    doc_type: str        # 'legal_writ' or 'psych_eval'\n    specialist_summary: str\n    final_report: str"
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html#building-the-agent-nodes",
+    "href": "05-nlp-document-pipeline.html#building-the-agent-nodes",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "3. Building the Agent Nodes",
+    "text": "3. Building the Agent Nodes\nWe need three distinct nodes: a router to classify the text, specialized summarizers to extract domain-specific entities, and a synthesizer to format the output for the attorney.\ndef routing_agent(state: AgentState):\n    \"\"\"Determines if the document is a court writ or a psychological evaluation.\"\"\"\n    prompt = f\"Classify this text as either 'legal_writ' or 'psych_eval'. Text: {state['document_text'][:500]}\"\n    response = local_llm.invoke([HumanMessage(content=prompt)])\n    \n    # Simple parsing logic for the POC\n    doc_type = \"psych_eval\" if \"psych\" in response.content.lower() else \"legal_writ\"\n    return {\"doc_type\": doc_type}\n\ndef legal_specialist(state: AgentState):\n    \"\"\"Extracts hearing dates, judge rulings, and custody status.\"\"\"\n    sys_msg = SystemMessage(content=\"You are a paralegal. Extract hearing dates, rulings, and next steps from this court writ. Be concise.\")\n    response = local_llm.invoke([sys_msg, HumanMessage(content=state[\"document_text\"])])\n    return {\"specialist_summary\": response.content}\n\ndef psych_specialist(state: AgentState):\n    \"\"\"Extracts behavioral observations and therapy recommendations.\"\"\"\n    sys_msg = SystemMessage(content=\"You are a clinical assistant. Summarize the behavioral observations and recommendations from this psychological evaluation safely and objectively.\")\n    response = local_llm.invoke([sys_msg, HumanMessage(content=state[\"document_text\"])])\n    return {\"specialist_summary\": response.content}\n\ndef lead_attorney_synthesizer(state: AgentState):\n    \"\"\"Drafts the final brief for the Mi Abogado lawyer.\"\"\"\n    sys_msg = SystemMessage(content=\"Draft a 3-bullet-point executive summary of this case update for the lead attorney.\")\n    prompt = f\"Document Type: {state['doc_type']}\\nDetails: {state['specialist_summary']}\"\n    response = local_llm.invoke([sys_msg, HumanMessage(content=prompt)])\n    return {\"final_report\": response.content}"
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html#orchestrating-the-graph",
+    "href": "05-nlp-document-pipeline.html#orchestrating-the-graph",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "4. Orchestrating the Graph",
+    "text": "4. Orchestrating the Graph\nWe map the nodes and define conditional edges to route the document to the correct specialist based on the router’s classification.\n# Initialize the graph\nworkflow = StateGraph(AgentState)\n\n# Add the nodes\nworkflow.add_node(\"router\", routing_agent)\nworkflow.add_node(\"legal_desk\", legal_specialist)\nworkflow.add_node(\"psych_desk\", psych_specialist)\nworkflow.add_node(\"synthesizer\", lead_attorney_synthesizer)\n\n# Define the routing logic\ndef route_document(state: AgentState):\n    if state[\"doc_type\"] == \"legal_writ\":\n        return \"legal_desk\"\n    return \"psych_desk\"\n\n# Build the edges\nworkflow.set_entry_point(\"router\")\nworkflow.add_conditional_edges(\n    \"router\",\n    route_document,\n    {\"legal_desk\": \"legal_desk\", \"psych_desk\": \"psych_desk\"}\n)\nworkflow.add_edge(\"legal_desk\", \"synthesizer\")\nworkflow.add_edge(\"psych_desk\", \"synthesizer\")\nworkflow.add_edge(\"synthesizer\", END)\n\n# Compile the Agentic RAG application\napp = workflow.compile()"
+  },
+  {
+    "objectID": "05-nlp-document-pipeline.html#execution-example",
+    "href": "05-nlp-document-pipeline.html#execution-example",
+    "title": "Appendix: Automating Documentary Work via Local Agentic RAG",
+    "section": "5. Execution Example",
+    "text": "5. Execution Example\nWhen a new document enters the system, the LangGraph workflow automatically classifies it, extracts the relevant legal or clinical entities, and generates a standardized brief.\n# Example input: A synthetic court writ\nsample_document = \"\"\"\nIN THE FAMILY COURT OF SANTIAGO. \nHearing Date: October 12, 2024. \nThe Honorable Judge presiding. \nOrder: The minor is to remain in the temporary collaborative residence for an additional 30 days pending the mother's completion of the mandated counseling program. Next review hearing scheduled for November 15, 2024.\n\"\"\"\n\ninitial_state = {\"document_text\": sample_document}\n\n# Run the graph\nfor output in app.stream(initial_state):\n    for key, value in output.items():\n        print(f\"Node '{key}' processed the document.\")\n\nprint(\"\\n--- FINAL ATTORNEY BRIEF ---\")\nprint(value[\"final_report\"])\n(Note: Because this pipeline relies on local LLM inference, live execution is disabled for this static website build. Below is the direct console output from running the app.stream() execution on the sample document).\nNode 'router' processed the document.\nNode 'legal_desk' processed the document.\nNode 'synthesizer' processed the document.\n\n--- FINAL ATTORNEY BRIEF ---\nHere is a 3-bullet-point executive summary for the lead attorney:\n\n• The court has ruled that the minor will remain in the temporary collaborative residence for an additional 30 days pending the mother's completion of the mandated counseling program.\n• To move forward, the mother must complete the required counseling program and prepare for the next review hearing.\n• A follow-up review hearing is scheduled for November 15, 2024, to assess the mother's progress and determine the next steps in this case."
+  }
+]

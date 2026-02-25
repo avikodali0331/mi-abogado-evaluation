@@ -1,0 +1,23 @@
+{
+  "01-data-simulation.qmd": {
+    "01-data-simulation.html": "7ef5187b"
+  },
+  "03-causal-ml-extension.qmd": {
+    "03-causal-ml-extension.html": "536edad9"
+  },
+  "02-baseline-replication.qmd": {
+    "02-baseline-replication.html": "3c241db6"
+  },
+  "about.qmd": {
+    "about.html": "3a36ae9d"
+  },
+  "index.qmd": {
+    "index.html": "49d1d366"
+  },
+  "04-cost-benefit.qmd": {
+    "04-cost-benefit.html": "0f38d169"
+  },
+  "05-nlp-document-pipeline.qmd": {
+    "05-nlp-document-pipeline.html": "18a2f6b4"
+  }
+}

@@ -1,0 +1,36 @@
+project:
+  type: website
+
+website:
+  title: "Beyond the Average Effect"
+  description: "A Causal ML Extension of the Mi Abogado RCT"
+  navbar:
+    background: primary
+    left:
+      - href: index.qmd
+        text: "Home"
+      - href: 01-data-simulation.qmd
+        text: "1. Data Simulation"
+      - href: 02-baseline-replication.qmd
+        text: "2. Baseline Replication"
+      - href: 03-causal-ml-extension.qmd
+        text: "3. Causal ML Extension"
+      - href: 04-cost-benefit.qmd
+        text: "4. Cost-Benefit Analysis"
+      - href: 05-nlp-document-pipeline.qmd
+        text: "5. Appendix: Agentic RAG Pipeline"
+    right:
+      - icon: github
+        href: https://github.com/yourusername/mi-abogado-extension
+        text: "Source Code"
+
+format:
+  html:
+    theme: flatly 
+    toc: true
+    toc-depth: 2
+    code-fold: show 
+
+execute:
+  warning: false
+  message: false
